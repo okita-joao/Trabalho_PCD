@@ -68,5 +68,5 @@ densidade = 0.60
 gerar_grafo(
     n,
     densidade,
-    "grafo_1000_60.csv"
+    f"grafo_{n}_{densidade}.csv"
 )
