@@ -21,6 +21,12 @@ char caminho_relatorio[1024] = "relatorio.txt";
 
 #define NUM_THREADS 100
 
+// Número de repetições para tirar a média de tempo
+#define REPS 5
+
+// Esta implementação não faz verificação prévia (sem lock) do vetor cinzas
+#define PRE_CHECK 0
+
 int *vertices_iniciais;
 
 // Declaração global da barreira de incialização do algoritmo
@@ -303,7 +309,14 @@ typedef struct{
     int *pretos;
     pthread_mutex_t *mutexes_vertices;
     Vertice *resultados;
+    long contagem;      // quantidade de vértices processados pela thread
 } arg;
+
+typedef struct{
+    double tempo;    // segundos
+    long total;      // soma dos vértices processados
+    long unicos;     // vértices distintos visitados
+} Resultado;
 
 void* BFS(void *argumento){
     arg dado = *(arg *)argumento;
@@ -316,6 +329,7 @@ void* BFS(void *argumento){
     Vertice *resultados = dado.resultados;
 
     Vertice *vertices = resultados;
+    long contagem = 0;
     
     Fila *Q = (Fila*)malloc(sizeof(Fila));
     if(Q == NULL){
@@ -337,12 +351,6 @@ void* BFS(void *argumento){
     vertices[index_vertice_origem].index_thread_visita = index_thread;
     cinzas[index_vertice_origem] = 1;
 
-    pthread_mutex_lock(&trava_print);
-
-    printf("\n+ Thread %d preparada para iniciar!\n", index_thread);
-
-    pthread_mutex_unlock(&trava_print);
-
     // Barreira para que todas as threads iniciem ao mesmo tempo
     pthread_barrier_wait(&barreira_inicializacao);
     
@@ -359,6 +367,8 @@ void* BFS(void *argumento){
             return NULL;
         }
         
+        contagem++;
+
         int u_index = *(int *)u->conteudo;
         for(int i = 0; i < g->num_vertices; i++){
 
@@ -404,6 +414,8 @@ void* BFS(void *argumento){
     
     free(Q);
 
+    ((arg *)argumento)->contagem = contagem;
+
     pthread_exit(NULL);
 }
 
@@ -411,7 +423,7 @@ void* BFS(void *argumento){
 //                    IMPLEMENTAÇÃO DAS THREADS VIA PTHREADS                  //
 // ===========================================================================//
 
-Vertice* BFS_multithread(Grafo *g, struct timeval *inicio, struct timeval *fim){
+Vertice* BFS_multithread(Grafo *g, int T, const int *starts, struct timeval *inicio, struct timeval *fim, Resultado *res){
     if(g == NULL || g->num_vertices <= 0){
         printf("Grafo inexistente!\n");
         return NULL;
@@ -420,7 +432,7 @@ Vertice* BFS_multithread(Grafo *g, struct timeval *inicio, struct timeval *fim){
     // 1. Criar as threads para a execução, e atribuir para cada uma
     //    o grafo e seus respectivos argumentos.
     
-    pthread_t *threads = (pthread_t*)malloc(NUM_THREADS*sizeof(pthread_t));
+    pthread_t *threads = (pthread_t*)malloc(T*sizeof(pthread_t));
     if(threads == NULL){
         printf("Erro ao alocar memória para o vetor de threads.\n");
         return NULL;
@@ -471,10 +483,10 @@ Vertice* BFS_multithread(Grafo *g, struct timeval *inicio, struct timeval *fim){
     }
 
     // Iniciando a barreira de inicialização e o mutex de prints
-    pthread_barrier_init(&barreira_inicializacao, NULL, NUM_THREADS + 1);
+    pthread_barrier_init(&barreira_inicializacao, NULL, T + 1);
     pthread_mutex_init(&trava_print, NULL);
 
-    arg *argumentos = (arg*)calloc(NUM_THREADS, sizeof(arg));
+    arg *argumentos = (arg*)calloc(T, sizeof(arg));
     if(argumentos == NULL){
         printf("Erro ao alocar memória para o vetor de argumentos das threads.\n");
         free(threads);
@@ -490,12 +502,12 @@ Vertice* BFS_multithread(Grafo *g, struct timeval *inicio, struct timeval *fim){
         return NULL;
     }
 
-    for(int i = 0; i < NUM_THREADS; i++){
+    for(int i = 0; i < T; i++){
         arg *argumento = &argumentos[i];
 
         argumento->g = g;
         argumento->index_thread = i;
-        argumento->index_vertice_origem = vertices_iniciais[i];
+        argumento->index_vertice_origem = starts[i];
         argumento->cinzas = cinzas;
         argumento->pretos = pretos;
         argumento->mutexes_vertices = mutexes_vertices;
@@ -510,9 +522,7 @@ Vertice* BFS_multithread(Grafo *g, struct timeval *inicio, struct timeval *fim){
 
     gettimeofday(inicio, NULL);
 
-    printf("\nBarreira liberada, threads em acao!\n");
-
-    for(int i = 0; i < NUM_THREADS; i++){
+    for(int i = 0; i < T; i++){
         pthread_join(threads[i], NULL);
     }
 
@@ -520,7 +530,18 @@ Vertice* BFS_multithread(Grafo *g, struct timeval *inicio, struct timeval *fim){
 
     double tempo_gasto = ((*fim).tv_sec - (*inicio).tv_sec) + ((*fim).tv_usec - (*inicio).tv_usec) / 1000000.0;
 
-    printf("\nTempo gasto: %f\n", tempo_gasto);
+    // Métricas da execução
+    long total = 0, unicos = 0;
+
+    for(int i = 0; i < T; i++)
+        total += argumentos[i].contagem;
+
+    for(int i = 0; i < g->num_vertices; i++)
+        unicos += cinzas[i];
+
+    res->tempo = tempo_gasto;
+    res->total = total;
+    res->unicos = unicos;
 
     // 3. Limpeza de memória
     free(cinzas);
@@ -583,8 +604,74 @@ int* gera_vertices_iniciais(int num_vertices, int num_threads){
     return vetor;
 }
 
+// Executa a BFS REPS vezes com T threads e devolve as médias em *m.
+// Se ultimo != NULL, devolve os resultados e os tempos da última execução; caso contrário, os libera.
+static int media(Grafo *g, int T, const int *starts, Resultado *m, Vertice **ultimo, struct timeval *ini, struct timeval *fim){
+    Vertice *res = NULL;
+    struct timeval t0, t1;
 
-void gera_relatorio(Grafo *g, Vertice *resultados, struct timeval *i, struct timeval *f){
+    m->tempo = 0;
+    m->total = 0;
+    m->unicos = 0;
+
+    for(int r = 0; r < REPS; r++){
+        Resultado x;
+
+        free(res);
+        res = BFS_multithread(g, T, starts, &t0, &t1, &x);
+        if(res == NULL) return 0;
+
+        m->tempo += x.tempo;
+        m->total += x.total;
+        m->unicos += x.unicos;
+    }
+
+    m->tempo /= REPS;
+    m->total /= REPS;
+    m->unicos /= REPS;
+
+    if(ultimo != NULL){
+        *ultimo = res;
+        *ini = t0;
+        *fim = t1;
+    }
+    else{
+        free(res);
+    }
+
+    return 1;
+}
+
+// Imprime o resumo da execução (sequencial x paralela) em out
+void imprime_saida(FILE *out, Grafo *g, Resultado *seq, Resultado *par){
+    int T = NUM_THREADS;
+
+    double speedup = seq->tempo / par->tempo;
+    double eficiencia = speedup / T;
+
+    fprintf(out, "=== BFS paralelo (Pthreads, COM exclusao mutua: mutex por vertice) ===\n");
+    fprintf(out, "Grafo: %s (%d vertices) | Threads: %d | Repeticoes: %d | PRE_CHECK: %d\n",
+            caminho, g->num_vertices, T, REPS, PRE_CHECK);
+    fprintf(out, "Vertices iniciais:");
+    for(int i = 0; i < T; i++) fprintf(out, " T%d=%d", i, vertices_iniciais[i]);
+    fprintf(out, "\n\n");
+
+    fprintf(out, "Sequencial (1 thread, inicio em %d):\n", vertices_iniciais[0]);
+    fprintf(out, "  Tempo:                  %.6f s\n", seq->tempo);
+    fprintf(out, "  Vertices visitados:     %ld\n\n", seq->unicos);
+
+    fprintf(out, "Paralelo (%d threads):\n", T);
+    fprintf(out, "  Tempo:                  %.6f s\n", par->tempo);
+    fprintf(out, "  Speedup:                %.4f\n", speedup);
+    fprintf(out, "  Eficiencia:             %.4f (%.2f%%)\n", eficiencia, eficiencia * 100.0);
+    fprintf(out, "  Vertices unicos:        %ld de %d\n", par->unicos, g->num_vertices);
+    fprintf(out, "  Vertices processados:   %ld (total somado das threads)\n", par->total);
+    fprintf(out, "  Trabalho redundante:    %ld\n", par->total - par->unicos);
+    fprintf(out, "  Vertices/s (unicos):    %.2f\n", par->unicos / par->tempo);
+    fprintf(out, "  Vertices/s (processados): %.2f\n", par->total / par->tempo);
+}
+
+void gera_relatorio(Grafo *g, Vertice *resultados, struct timeval *i, struct timeval *f, Resultado *seq, Resultado *par){
 
     FILE *arquivo = fopen(caminho_relatorio, "w");
 
@@ -592,6 +679,10 @@ void gera_relatorio(Grafo *g, Vertice *resultados, struct timeval *i, struct tim
         printf("Caminho invalido ou erro de permissao.\n");
         return ;
     }
+
+    // Cabeçalho: mesma saída impressa no terminal
+    imprime_saida(arquivo, g, seq, par);
+    fprintf(arquivo, "\n");
 
     struct timeval inicio = *i, fim = *f;
 
@@ -680,16 +771,19 @@ int main(){
         return -1;
     }
 
-    printf("Começando...\n");
-    
-    // Rodando a Busca em Largura:
-    Vertice *resultados = BFS_multithread(g, &inicio, &fim);
+    // Rodando a Busca em Largura (parte sequencial e parte paralela):
+    Resultado seq, par;
+    Vertice *resultados = NULL;
 
-    if(resultados == NULL){
+    int ok = media(g, 1, vertices_iniciais, &seq, NULL, NULL, NULL)
+          && media(g, NUM_THREADS, vertices_iniciais, &par, &resultados, &inicio, &fim);
+
+    if(!ok){
         printf("ERRO NA FUNÇÃO BFS_multithread.\n");
     }
     else{
-        gera_relatorio(g, resultados, &inicio, &fim);
+        imprime_saida(stdout, g, &seq, &par);
+        gera_relatorio(g, resultados, &inicio, &fim, &seq, &par);
         free(resultados);
     }
     
