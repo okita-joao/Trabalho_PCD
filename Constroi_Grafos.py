@@ -1,82 +1,72 @@
 import numpy as np
-import math
 import csv
 
-# Número de vértices que se deseja que o grafo tenha
-n = 5
+def gerar_grafo(n, densidade, arquivo):
+    matriz = np.zeros((n, n), dtype=np.int8)
 
-# Porcentagem com relação ao número de vértices que define o número de arestas do grafo
-# Caso deseje que o número de arestas possa ser superior ao número de vértices, então percent_arestas = False
-percent_arestas = 0.6
+    # Número máximo de arestas
+    max_arestas = n * (n - 1) // 2
 
-# Variável que define se o grafo será completo ou não
-completo = False
+    # Número desejado de arestas
+    num_arestas = int(max_arestas * densidade)
 
-# Nome do arquivo no qual a matriz de adjacência do grafo será escrita (Obs.: pode colocar o caminho do arquivo também).
-file_name = f"grafo.csv"
+    # ------------------------------------------------
+    # 1. Cria uma árvore para garantir conectividade
+    # ------------------------------------------------
 
-matriz_adj = np.full((n, n), 1)
+    rng = np.random.default_rng()
 
-if(not completo):
-    if(percent_arestas == False):
-        # Criando uma matriz de adjacências n x n simétrica (Grafo Não-Direcionado)
-        for i in range(0, n):
-            arestas = np.random.choice([0, 1], size = n - i)
+    vertices = np.arange(n)
+    rng.shuffle(vertices)
 
-            for j in range(i, n):
-                x = arestas[j - i]
-                matriz_adj[i, j] = x
-                matriz_adj[j, i] = x
+    for i in range(1, n):
+        u = vertices[i]
+        v = vertices[rng.integers(0, i)]
 
-    elif(type(percent_arestas) == float):
-        max_arestas = (n*(n-1))/2
-        tam = math.floor(n*percent_arestas)
+        matriz[u][v] = 1
+        matriz[v][u] = 1
 
-        rng = np.random.default_rng()
+    arestas_atual = n - 1
 
-        arestas_geradas = rng.choice(np.arange(0, max_arestas), size=tam, replace=False)
-        arestas_geradas = arestas_geradas.astype(np.int8)
-        lista = arestas_geradas.tolist()
+    # ------------------------------------------------
+    # 2. Adiciona arestas aleatórias
+    # ------------------------------------------------
 
-        cont = 0
-        inicio = 0
-        fim = 0
+    while arestas_atual < num_arestas:
 
-        for i in range(n-1):
-            fim = inicio + i
+        u = rng.integers(0, n)
+        v = rng.integers(0, n)
 
-            linha = []
+        # Evita laço
+        if u == v:
+            continue
 
-            for j in range(inicio, fim + 1):
-                A = -1
+        # Evita aresta repetida
+        if matriz[u][v] == 1:
+            continue
 
-                if(cont < tam):
-                    A = lista[cont]
+        matriz[u][v] = 1
+        matriz[v][u] = 1
 
-                if(j == A):
-                    linha.append(1)
-                    cont += 1
-                else:
-                    linha.append(0)
+        arestas_atual += 1
 
-            index_linha = i+1
-            for j in range(0, i+1):
-                matriz_adj[index_linha, j] = linha[j]
-                matriz_adj[j, index_linha] = linha[j]
+    # ------------------------------------------------
+    # 3. Salva no CSV
+    # ------------------------------------------------
 
-            inicio = fim + 1
+    with open(arquivo, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerows(matriz)
 
-    else:
-        print(f"Erro na declaração da variável percent_arestas, dessa forma gerou-se um grafo completo {n}x{n}.")
+    return matriz
 
-# Prevenção de laços no grafo
-for i in range(n):
-  matriz_adj[i, i] = 0
 
-# Convertendo os valores da matriz para int de 8bits
-matriz_adj = matriz_adj.astype(np.int8)
+# Exemplo
+n = 1000
+densidade = 0.60
 
-# Escrevendo o grafo gerado num arquivo .csv
-with open(file_name, 'w', newline='') as csvfile:
-  grafo_writer = csv.writer(csvfile, delimiter=',')
-  grafo_writer.writerows(matriz_adj)
+gerar_grafo(
+    n,
+    densidade,
+    "grafo_1000_60.csv"
+)
