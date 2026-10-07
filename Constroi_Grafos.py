@@ -62,11 +62,12 @@ def gerar_grafo(n, densidade, arquivo):
 
 
 # Exemplo
-n = 1000
-densidade = 0.60
+n = 100
+densidade = 0.8
 
 gerar_grafo(
     n,
     densidade,
     f"grafo_{n}_{densidade}.csv"
 )
+

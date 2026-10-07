@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <windows.h>
 #include <time.h>
 #include <sys/time.h>
 
@@ -12,14 +11,14 @@
 // ===========================================================================//
 
 // Caminho do arquivo contendo a matriz original
-char caminho[1024] = "grafo_10000x10000.csv";
+char caminho[1024] = "/home/joao/Documents/projeto/Trabalho_PCD/Grafos/5000vertices/grafo_5000_0.8.csv";
 
 char caminho_relatorio[1024] = "relatorio.txt";
 
 // 1 = Aleatório | 0 = Arbitrário
 #define V_INICIAIS_RND 1
 
-#define NUM_THREADS 100
+#define NUM_THREADS 16
 
 // Número de repetições para tirar a média de tempo
 #define REPS 5
